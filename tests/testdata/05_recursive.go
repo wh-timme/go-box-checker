@@ -4,11 +4,14 @@ package parser
 func f_top(db *DepthBox) {
     db.New()
     f_expr(db)
-    db.Wrap()
 }
 
 func f_expr(db *DepthBox) {
-    db.New()
-    f_expr(db)
+	switch mode {
+		case 1:
+			db.New()
+			f_expr(db)
+		default: ;
+	}
     db.Wrap()
 }

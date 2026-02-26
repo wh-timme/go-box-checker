@@ -1,8 +1,11 @@
 package parser
 
-// FAIL: loop body only has New
+// FAIL: loop condition only has New
 func f_top(db *DepthBox) {
-    for i := 0; i < n; i++ {
-        db.New()
-    }
+	for f_cond() {}
+}
+
+func f_cond(db *DepthBox) bool {
+	db.New()
+	return false
 }

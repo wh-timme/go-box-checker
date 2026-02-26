@@ -7,8 +7,12 @@ func f_top(db *DepthBox) {
     case 1:
         db.Wrap()
     case 2:
+		fallthrough
+    case 3:
+        db.Wrap()
+        db.New()
         db.Wrap()
     default:
-        db.Wrap()
+        panic("discard")
     }
 }
