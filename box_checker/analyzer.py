@@ -152,11 +152,11 @@ def analyze_program(
 
     # Process SCCs (Tarjan returns in reverse topo order)
     for scc in sccs:
-        # Bootstrap: set SCC-internal summaries to {0} so recursive calls
-        # don't block the first iteration.
-        for fname in scc:
-            if fname in summaries:
-                summaries[fname].delta_set = DeltaSet.single(0)
+        # Keep BOTTOM as initial summary. When analyzing a function and
+        # encountering a call to a BOTTOM-summary callee within the same
+        # SCC, compose returns BOTTOM (path pruned). This correctly
+        # handles recursion: base-case paths produce the initial delta,
+        # then recursive paths refine in subsequent rounds.
         for _ in range(max_rounds):
             changed = False
             for fname in scc:
