@@ -1,12 +1,14 @@
 package parser
 
-// PASS: break after Wrap inside loop
+// PASS: break without Wrap inside loop
 func f_top(db *DepthBox) {
-    for i := 0; i < n; i++ {
+    for {
         db.New()
-        db.Wrap()
-        if done {
-            break
-        }
+		if mode {
+            db.Wrap()
+		} else {
+			break
+		}
     }
+	db.Wrap()
 }

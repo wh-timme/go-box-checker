@@ -1,10 +1,22 @@
 package parser
 
-// PASS: panic path discarded
+// PASS: panic paths discarded
 func f_top(db *DepthBox) {
     db.New()
-    if err {
-        panic("fail")
-    }
-    db.Wrap()
+	if inside_if_else {
+        if cond {
+            db.Wrap()
+        } else {
+            panic("discard")
+        }
+	} else {
+    	switch mode {
+    	case 1:
+            db.Wrap()
+    	case 2:
+            fallthrough
+    	default:
+            panic("discard")
+    	}
+	}
 }
