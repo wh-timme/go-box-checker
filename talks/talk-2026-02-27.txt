@@ -1,0 +1,1579 @@
+
+╭─── Claude Code v2.1.62 ──────────────────────────────────────────────────────╮
+│                                  │ Tips for getting started                  │
+│           Welcome back!          │ Run /init to create a CLAUDE.md file wit… │
+│                                  │ ───────────────────────────────────────── │
+│              ▐▛███▜▌             │ Recent activity                           │
+│             ▝▜█████▛▘            │ No recent activity                        │
+│               ▘▘ ▝▝              │                                           │
+│                                  │                                           │
+│   Opus 4.6 · API Usage Billing   │                                           │
+│            ~/go-demo             │                                           │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+  Welcome to Opus 4.6
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Plan to implement                                                            │
+│                                                                              │
+│ 压力测试生成器实现计划                                                       │
+│                                                                              │
+│ 背景                                                                         │
+│                                                                              │
+│ 当前测试用例仅 15 个简单函数，而用户实际需要检查的 Go                        │
+│ 包含几百个函数、几万行代码。需要构建接近真实规模的压力测试来验证 box-checker │
+│  的正确性和性能。                                                            │
+│                                                                              │
+│ 产物                                                                         │
+│                                                                              │
+│ ┌──────────────────────────┬──────────────────────────────────────────┐      │
+│ │           文件           │                   说明                   │      │
+│ ├──────────────────────────┼──────────────────────────────────────────┤      │
+│ │ tests/gen_stress.py      │ 生成器脚本，运行一次即可产出下面两个文件 │      │
+│ ├──────────────────────────┼──────────────────────────────────────────┤      │
+│ │ tests/testdata/stress.go │ 生成的 Go 源文件，~400+ 函数、~20000 行  │      │
+│ ├──────────────────────────┼──────────────────────────────────────────┤      │
+│ │ tests/test_stress.py     │ pytest 测试文件，内嵌 manifest 字典      │      │
+│ └──────────────────────────┴──────────────────────────────────────────┘      │
+│                                                                              │
+│ 生成器架构                                                                   │
+│                                                                              │
+│ gen_stress.py                                                                │
+│   ├── GoEmitter          # Go 代码字符串构建器（缩进管理、emit 语句）        │
+│   ├── StressGenerator    # 编排所有分类的生成                                │
+│   │     ├── _gen_simple()         # 分类01: 线性序列                         │
+│   │     ├── _gen_if_else()        # 分类02: if/else 分支                     │
+│   │     ├── _gen_bare_for()       # 分类03: 裸 for {}                        │
+│   │     ├── _gen_cond_for()       # 分类04: 有条件 for                       │
+│   │     ├── _gen_for_call()       # 分类05: for f_cond() {}                  │
+│   │     ├── _gen_switch()         # 分类06: switch/case                      │
+│   │     ├── _gen_fallthrough()    # 分类07: fallthrough                      │
+│   │     ├── _gen_panic()          # 分类08: panic 剪枝                       │
+│   │     ├── _gen_break_continue() # 分类09: break/continue                   │
+│   │     ├── _gen_labeled()        # 分类10: 标签 break/continue              │
+│   │     ├── _gen_return()         # 分类11: 提前 return                      │
+│   │     ├── _gen_nested()         # 分类12: 嵌套循环                         │
+│   │     ├── _gen_cross_func()     # 分类13: 跨函数调用链                     │
+│   │     ├── _gen_recursive()      # 分类14: 递归/互递归                      │
+│   │     └── _gen_mixed()          # 分类15: 混合复杂场景                     │
+│   └── main()             # 生成 stress.go + test_stress.py                   │
+│                                                                              │
+│ 各分类规模估算                                                               │
+│                                                                              │
+│ ┌──────┬────────────────┬──────┬────────┬──────────┬──────┬──────────┐       │
+│ │ 分类 │      场景      │ 平衡 │ 不平衡 │ 辅助函数 │ 合计 │ 估算行数 │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 01   │ 线性序列       │ 20   │ 20     │ 0        │ 40   │ 1600     │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 02   │ if/else        │ 25   │ 25     │ 0        │ 50   │ 1500     │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 03   │ 裸 for {}      │ 16   │ 14     │ 0        │ 30   │ 1200     │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 04   │ 有条件 for     │ 16   │ 14     │ 0        │ 30   │ 1050     │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 05   │ for + 条件调用 │ 10   │ 10     │ 20       │ 40   │ 500      │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 06   │ switch/case    │ 20   │ 20     │ 0        │ 40   │ 2000     │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 07   │ fallthrough    │ 10   │ 10     │ 0        │ 20   │ 800      │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 08   │ panic 剪枝     │ 10   │ 10     │ 0        │ 20   │ 600      │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 09   │ break/continue │ 16   │ 14     │ 0        │ 30   │ 1200     │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 10   │ 标签跳转       │ 13   │ 12     │ 0        │ 25   │ 1500     │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 11   │ 提前 return    │ 10   │ 10     │ 0        │ 20   │ 500      │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 12   │ 嵌套循环       │ 13   │ 12     │ 0        │ 25   │ 2000     │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 13   │ 跨函数调用     │ 15   │ 15     │ 60       │ 90   │ 1800     │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 14   │ 递归/互递归    │ 10   │ 10     │ 30       │ 50   │ 1500     │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 15   │ 混合复杂       │ 10   │ 10     │ 10       │ 30   │ 2000     │       │
+│ ├──────┼────────────────┼──────┼────────┼──────────┼──────┼──────────┤       │
+│ │ 合计 │                │ ~214 │ ~196   │ ~120     │ ~530 │ ~19750   │       │
+│ └──────┴────────────────┴──────┴────────┴──────────┴──────┴──────────┘       │
+│                                                                              │
+│ 生成策略                                                                     │
+│                                                                              │
+│ 简单分类（01-02, 08, 11）：参数化生成，用随机种子（固定                      │
+│ seed=42）变化序列长度和分支结构。                                            │
+│                                                                              │
+│ 循环分类（03-05, 09-10）：使用参数化模板，确保平衡版本循环体每次迭代         │
+│ delta=0，不平衡版本通过省略 Wrap 或 continue 跳过 Wrap 制造缺口。            │
+│                                                                              │
+│ switch 分类（06-07）：变化 case 数量（2-5）、是否有 default、fallthrough     │
+│ 链长度。                                                                     │
+│                                                                              │
+│ 嵌套分类（12）：基于现有测试 12-15 的模式扩展，变化嵌套深度和标签跳转目标。  │
+│                                                                              │
+│ 调用图分类（13-14）：                                                        │
+│ - 线性链：f_top → f_a → f_b → f_c                                            │
+│ - 扇出：f_top 调用多个辅助函数                                               │
+│ - 直接递归：switch base-case + recursive-case                                │
+│ - 互递归：A↔B 在同一 SCC                                                     │
+│                                                                              │
+│ 混合分类（15）：组合多种构造，模拟真实 parser 函数（if + for + switch +      │
+│ 跨函数调用）。                                                               │
+│                                                                              │
+│ 测试文件结构                                                                 │
+│                                                                              │
+│ # tests/test_stress.py — 核心结构                                            │
+│ _cfgs = {name: CFGBuilder().build(node) for name, node in funcs.items()}     │
+│ _summaries = analyze_program(_cfgs)  # 全局只分析一次                        │
+│                                                                              │
+│ EXPECTED: dict[str, bool] = { ... }  # 由 gen_stress.py 内嵌生成             │
+│                                                                              │
+│ @pytest.mark.parametrize("entry,expected", list(EXPECTED.items()))           │
+│ def test_stress(entry, expected):                                            │
+│     ds = _summaries[entry].delta_set                                         │
+│     is_balanced = (not ds.is_top and not ds.is_bottom                        │
+│                    and ds.values == frozenset({0}))                          │
+│     assert is_balanced == expected                                           │
+│                                                                              │
+│ 关键优化：只调用 analyze_program 一次（它处理所有函数），然后逐个检查        │
+│ summary，避免 N 次全量分析。                                                 │
+│                                                                              │
+│ 实现步骤                                                                     │
+│                                                                              │
+│ 1. 实现 GoEmitter 类（缩进管理 + 各语句 emit 方法）                          │
+│ 2. 实现 StressGenerator 框架 + 分类 01-02（验证基本流程）                    │
+│ 3. 实现分类 03-05（for 循环系列）                                            │
+│ 4. 实现分类 06-08（switch + panic）                                          │
+│ 5. 实现分类 09-12（break/continue + 标签 + 嵌套）                            │
+│ 6. 实现分类 13-14（跨函数 + 递归）                                           │
+│ 7. 实现分类 15（混合复杂）                                                   │
+│ 8. 实现测试文件生成逻辑                                                      │
+│ 9. 运行生成器，产出 stress.go + test_stress.py                               │
+│ 10. 运行 pytest tests/test_stress.py，修复失败项                             │
+│                                                                              │
+│ 验证                                                                         │
+│                                                                              │
+│ python tests/gen_stress.py                    # 生成 stress.go +             │
+│ test_stress.py                                                               │
+│ wc -l tests/testdata/stress.go                # 确认 ~20000 行               │
+│ grep -c '^func f_' tests/testdata/stress.go   # 确认 ~400-530 个函数         │
+│ python -m pytest tests/test_stress.py -v      # 全部通过                     │
+│ python -m pytest tests/ -v                    # 新旧测试全部通过             │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+● 【前置说明】本次任务是实现压力测试生成器，包含三个文件：gen_stress.py（生成器
+  ）、stress.go（生成的Go源文件）、test_stress.py（pytest测试文件）。我需要先了
+  解现有代码结构和测试模式，然后实现生成器。
+
+  Let me start by exploring the existing codebase to understand the patterns.
+
+● Explore(Explore codebase structure)
+  ⎿  Done (32 tool uses · 45.2k tokens · 2m 11s)
+  (ctrl+o to expand)
+
+● Now let me read the key files directly to get exact import patterns and API
+  signatures.
+
+● Read 8 files (ctrl+o to expand)
+
+● Let me also read the remaining testdata files to understand all patterns.
+
+● Read 8 files (ctrl+o to expand)
+
+● Now let me check the analyzer API more carefully.
+
+● Read 1 file (ctrl+o to expand)
+  ⎿  API Error: Claude's response exceeded the 32000 output token maximum. To 
+     configure this behavior, set the CLAUDE_CODE_MAX_OUTPUT_TOKENS environment 
+     variable.
+  ⎿  Interrupted · What should Claude do instead?
+
+❯ 继续 
+  ⎿  Interrupted · What should Claude do instead?
+
+❯ 可以拆分成不同的文件，避免一次输出过多go测题 
+  ⎿  API Error: Claude's response exceeded the 32000 output token maximum. To 
+     configure this behavior, set the CLAUDE_CODE_MAX_OUTPUT_TOKENS environment 
+     variable.
+
+● 【前置说明】理解了，将生成的 Go 文件按分类拆分（如 stress_01_simple.go,
+  stress_02_if_else.go 等），避免单文件过大。我先创建任务列表，然后分步实现。
+
+● Now let me implement the generator framework.
+
+● Write(tests/gen_stress.py)
+  ⎿  Wrote 1377 lines to tests/gen_stress.py
+     #!/usr/bin/env python3
+     """Stress-test generator for box_checker.
+
+     Produces multiple Go source files under tests/testdata/stress_*.go
+     and a single test_stress.py with an EXPECTED manifest.
+     """
+
+     from __future__ import annotations
+
+     import random
+     … +1367 lines (ctrl+o to expand)
+  ⎿  Found 10 new diagnostic issues in 1 file (ctrl+o to expand)
+
+● I need to fix the type annotation for _register — I'm passing tuples as keys
+  but the signature says str. Let me fix that.
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 2 lines, removed 2 lines
+      160          # {func_name: expected_balanced}                      
+      161          self.expected: dict[str, bool] = {}                   
+      162                                                                
+      163 -    def _register(self, name: str, balanced: bool) -> None:   
+      164 -        self.expected[name] = balanced                        
+      163 +    def _register(self, key: tuple[str, str],                 
+          +balanced: bool) -> None:                                      
+      164 +        self.expected[key] = balanced                         
+      165                                                                
+      166      # -- public API                                           
+           ---------------------------------------------------------     
+      167                                                                
+
+● Now let's run the generator and see what we get.
+
+● Bash(python tests/gen_stress.py)
+  ⎿  Generated 15 Go files with 440 test entries
+       Balanced: 224, Unbalanced: 216
+       stress_01_simple.go: 697 lines, 40 entries
+     … +14 lines (ctrl+o to expand)
+  ⎿  Found 4 new diagnostic issues in 1 file (ctrl+o to expand)
+
+● Good, 440 entries across 15 files. Let me check the total line count and then
+  run the tests.
+
+● Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● 579 functions, 7586 lines. Let me first run the tests to verify correctness,
+  then scale up.
+
+● Bash(python -m pytest tests/test_stress.py -x --tb=short -q 2>&1 | head -80)
+  ⎿  ==================================== ERRORS ==========================
+     ==========
+     ____________________ ERROR collecting tests/test_stress.py ___________
+     … +16 lines (ctrl+o to expand)
+
+● Bash(pip install tree-sitter-go 2>&1 | tail -5)
+  ⎿      virtual environment for you. Make sure you have python-pipx
+         installed via pacman.
+     … +5 lines (ctrl+o to expand)
+
+● Bash(which python3 && python3 --version && pip3 --version 2>&1; ls -la .venv
+      2>/dev/null || echo "No .venv"; cat pyproject.toml 2>/dev/null | head -30)
+  ⎿  /usr/bin/python3
+     Python 3.14.2
+     pip 25.3 from /usr/lib/python3.14/site-packages/pip (python 3.14)
+     … +26 lines (ctrl+o to expand)
+
+● Bash(source .venv/bin/activate && python -m pytest tests/test_stress.py -x
+      --tb=short -q 2>&1 | tail -30)
+  ⎿  ......................................................................
+     .. [ 16%]
+     ......................................................................
+     … +17 lines (ctrl+o to expand)
+
+● Good, 353 pass, 1 fails. Let me investigate the failing test.
+
+● Bash(source .venv/bin/activate && grep -A 30 'func f_s13_bal_003'
+      tests/testdata/stress_13_cross_func.go)
+  ⎿  func f_s13_bal_003(db *DepthBox) {
+        f_s13_h_003_0(db)
+        f_s13_h_003_1(db)
+     … +28 lines (ctrl+o to expand)
+
+● Bash(source .venv/bin/activate && grep -B 10 'func f_s13_bal_003'
+      tests/testdata/stress_13_cross_func.go | head -20)
+  ⎿  }
+
+     func f_s13_h_003_1(db *DepthBox) {
+     … +8 lines (ctrl+o to expand)
+
+● Bash(source .venv/bin/activate && grep 'func f_s13_h_003'
+      tests/testdata/stress_13_cross_func.go)
+  ⎿  func f_s13_h_003_0(db *DepthBox) {
+     func f_s13_h_003_1(db *DepthBox) {
+     func f_s13_h_003_2(db *DepthBox) {
+
+● Bash(source .venv/bin/activate && grep -A 2 'func f_s13_h_003'
+      tests/testdata/stress_13_cross_func.go)
+  ⎿  func f_s13_h_003_0(db *DepthBox) {
+        db.New()
+     }
+     … +8 lines (ctrl+o to expand)
+
+● The bug is in the cross-func balanced chain: wrong number of New vs Wrap
+  helpers. Let me fix it.
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      1023                      hname = f"f_s13_h_{idx:03d}_{h}"         
+      1024                      helpers.append(hname)                    
+      1025                      self.em.func_open(hname)                 
+      1026 -                    if h < chain_len // 2:                   
+      1026 +                    if h < (chain_len + 1) // 2:             
+      1027                          self.em.new()                        
+      1028                      else:                                    
+      1029                          self.em.wrap()                       
+
+● Now regenerate and retest.
+
+● Bash(source .venv/bin/activate && python tests/gen_stress.py && python -m
+      pytest tests/test_stress.py -x --tb=short -q 2>&1 | tail -15)
+  ⎿  Generated 15 Go files with 440 test entries
+       Balanced: 224, Unbalanced: 216
+       stress_01_simple.go: 697 lines, 40 entries
+     … +23 lines (ctrl+o to expand)
+
+● Another failure in cat-13 unbalanced. The problem is in the unbalanced chain
+  generator — the "ensure imbalance" logic is flawed. Let me check and fix.
+
+● Bash(source .venv/bin/activate && grep -A 20 'func f_s13_unb_015'
+      tests/testdata/stress_13_cross_func.go && echo "===" && grep -B 5 -A 3
+      'func f_s13_h_015' tests/tes…)
+  ⎿  func f_s13_unb_015(db *DepthBox) {
+        f_s13_h_015_0(db)
+        f_s13_h_015_1(db)
+     … +43 lines (ctrl+o to expand)
+
+● The unbalanced chain logic has a bug in tracking totals. Let me fix the
+  _gen_cross_func method's unbalanced section.
+
+● Read 1 file (ctrl+o to expand)
+
+● Let me find the exact cross-func unbalanced section.
+
+● Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● The problem is clear — the re-roll doesn't actually re-emit the helper. And
+  the total tracking is broken. Let me rewrite this section to guarantee
+  imbalance by simply adding an extra db.New() in the main function if the total
+   happens to be balanced.
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 5 lines, removed 14 lines
+      1065          # Unbalanced: chain has net delta != 0               
+      1066          for _ in range(15):                                  
+      1067              helpers = []                                     
+      1068 -            total_n, total_w = 0, 0                          
+      1068 +            total_delta = 0                                  
+      1069              hcount = self.rng.randint(2, 4)                  
+      1070              for h in range(hcount):                          
+      1071                  hname = f"f_s13_h_{idx:03d}_{h}"             
+      1072                  helpers.append(hname)                        
+      1073                  n = self.rng.randint(0, 2)                   
+      1074                  w = self.rng.randint(0, 2)                   
+      1075 -                total_n += n                                 
+      1076 -                total_w += w                                 
+      1075 +                total_delta += (n - w)                       
+      1076                  self.em.func_open(hname)                     
+      1077                  self._emit_new_wrap_seq(n, w)                
+      1078                  self.em.func_close()                         
+      1079                  self.em.blank()                              
+      1080 -            # Ensure total is unbalanced                     
+      1081 -            while total_n == total_w:                        
+      1082 -                # redo last helper                           
+      1083 -                hname = helpers[-1]                          
+      1084 -                n = self.rng.randint(0, 2)                   
+      1085 -                w = self.rng.randint(0, 2)                   
+      1086 -                total_n = total_n - 0 + n  # approx, just    
+           -re-roll                                                      
+      1087 -                total_w = total_w - 0 + w                    
+      1088 -                if total_n != total_w:                       
+      1089 -                    break                                    
+      1090 -                total_n += 1  # force imbalance              
+      1080                                                               
+      1081              name = f"f_s13_unb_{idx:03d}"                    
+      1082              self.em.func_open(name)                          
+      1083              for hname in helpers:                            
+      1084                  self.em.call(hname)                          
+      1085 +            # Ensure net != 0: add extra New if currently    
+           +balanced                                                     
+      1086 +            if total_delta == 0:                             
+      1087 +                self.em.new()                                
+      1088              self.em.func_close()                             
+      1089              self.em.blank()                                  
+      1090              self._register((fname, name), False)             
+
+● Bash(source .venv/bin/activate && python tests/gen_stress.py && python -m
+      pytest tests/test_stress.py -x --tb=short -q 2>&1 | tail -10)
+  ⎿  Generated 15 Go files with 440 test entries
+       Balanced: 224, Unbalanced: 216
+       stress_01_simple.go: 697 lines, 40 entries
+     … +18 lines (ctrl+o to expand)
+
+● Progress: 390 pass now. Let me investigate the mutual recursion balanced case.
+
+● Bash(source .venv/bin/activate && grep -A 15 'func f_s14_mbal_a_020'
+      tests/testdata/stress_14_recursive.go && echo "===" && grep -A 15 'func
+      f_s14_mbal_b_020' tests/…)
+  ⎿  func f_s14_mbal_a_020(db *DepthBox) {
+        switch mode {
+        case 1:
+     … +30 lines (ctrl+o to expand)
+
+● The mutual recursion pattern is wrong — A: New + call B where B: Wrap + call A
+   doesn't produce a balanced result in abstract interpretation. I need to fix
+  the pattern so each function independently wraps its call.
+
+● Read 1 file (ctrl+o to expand)
+
+● Now I'll fix the mutual recursion balanced pattern: each function should wrap
+  its own call (New + call + Wrap), so the call's callee is balanced
+  independently.
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 6 lines, removed 4 lines
+      1146              self._register((fname, name), False)             
+      1147              idx += 1                                         
+      1148                                                               
+      1149 -        # Mutual recursion balanced: A calls B, B calls A    
+      1149 +        # Mutual recursion balanced: A calls B               
+           + with New+B+Wrap, B calls A with New+A+Wrap                  
+      1150          for _ in range(5):                                   
+      1151              name_a = f"f_s14_mbal_a_{idx:03d}"               
+      1152              name_b = f"f_s14_mbal_b_{idx:03d}"               
+      1153 -            # A: New + call B                                
+      1153 +            # A: switch { case 1: base; default: New + B +   
+           +Wrap }                                                       
+      1154              self.em.func_open(name_a)                        
+      1155              self.em.switch_open()                            
+      1156              self.em.case_open("1")                           
+     ...
+      1159              self.em.default_open()                           
+      1160              self.em.new()                                    
+      1161              self.em.call(name_b)                             
+      1162 +            self.em.wrap()                                   
+      1163              self.em.case_close()                             
+      1164              self.em.block_close()                            
+      1165              self.em.func_close()                             
+      1166              self.em.blank()                                  
+      1167 -            # B: Wrap + call A                               
+      1167 +            # B: switch { case 1: base; default: New + A +   
+           +Wrap }                                                       
+      1168              self.em.func_open(name_b)                        
+      1169              self.em.switch_open()                            
+      1170              self.em.case_open("1")                           
+      1171              self.em.line("; // base")                        
+      1172              self.em.case_close()                             
+      1173              self.em.default_open()                           
+      1174 -            self.em.wrap()                                   
+      1174 +            self.em.new()                                    
+      1175              self.em.call(name_a)                             
+      1176 +            self.em.wrap()                                   
+      1177              self.em.case_close()                             
+      1178              self.em.block_close()                            
+      1179              self.em.func_close()                             
+
+● Bash(source .venv/bin/activate && python tests/gen_stress.py && python -m
+      pytest tests/test_stress.py -x --tb=short -q 2>&1 | tail -10)
+  ⎿  Generated 15 Go files with 440 test entries
+       Balanced: 224, Unbalanced: 216
+       stress_01_simple.go: 697 lines, 40 entries
+     … +17 lines (ctrl+o to expand)
+
+● All 440 tests pass. Now let me scale up the generators to reach ~20000 lines.
+  Currently at 7586 lines. I need to roughly triple the output. Let me increase
+  the counts for each category.
+
+● Read 1 file (ctrl+o to expand)
+
+● I need to increase the scale across all categories. The most effective
+  approach is to increase sequence lengths and repetition counts. Let me make
+  targeted edits to each category to roughly triple the output.
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      288          idx = 0                                               
+      289                                                                
+      290          # Balanced: varying lengths of New+Wrap pairs         
+      291 -        for length in range(1, 21):                           
+      291 +        for length in range(1, 51):                           
+      292              name = f"f_s01_bal_{idx:03d}"                     
+      293              self.em.func_open(name)                           
+      294              for _ in range(length):                           
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 3 lines, removed 3 lines
+      301              idx += 1                                          
+      302                                                                
+      303          # Unbalanced: more New than Wrap or vice versa        
+      304 -        for i in range(20):                                   
+      304 +        for i in range(50):                                   
+      305              name = f"f_s01_unb_{idx:03d}"                     
+      306 -            news = self.rng.randint(1, 8)                     
+      307 -            wraps = self.rng.randint(0, 8)                    
+      306 +            news = self.rng.randint(1, 15)                    
+      307 +            wraps = self.rng.randint(0, 15)                   
+      308              while news == wraps:                              
+      309                  wraps = self.rng.randint(0, 8)                
+      310              self.em.func_open(name)                           
+
+● Now scale up cat-02 (if/else).
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 2 lines, removed 2 lines
+      327          idx = 0                                               
+      328                                                                
+      329          # Balanced: both branches have same delta             
+      330 -        for depth in range(1, 6):                             
+      331 -            for _ in range(5):                                
+      330 +        for depth in range(1, 8):                             
+      331 +            for _ in range(7):                                
+      332                  name = f"f_s02_bal_{idx:03d}"                 
+      333                  self.em.func_open(name)                       
+      334                  # prefix New                                  
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      352                  idx += 1                                      
+      353                                                                
+      354          # Unbalanced: branches have different delta           
+      355 -        for _ in range(25):                                   
+      355 +        for _ in range(50):                                   
+      356              name = f"f_s02_unb_{idx:03d}"                     
+      357              self.em.func_open(name)                           
+      358              pre = self.rng.randint(0, 3)                      
+
+● Now scale up cats 03, 04 (for loops).
+
+● Searched for 1 pattern (ctrl+o to expand)
+
+● Instead of editing each one individually, let me take a more efficient
+  approach — I'll add a scale multiplier parameter and apply it across the
+  board.
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 6 lines, removed 1 line
+      152  # ----------------------------------------------------------- 
+           ----------------                                              
+      153                                                                
+      154  class StressGenerator:                                        
+      155 -    def __init__(self, seed: int = SEED) -> None:             
+      155 +    def __init__(self, seed: int = SEED, scale: float = 1.0   
+          +) -> None:                                                    
+      156          self.rng = random.Random(seed)                        
+      157          self.em = GoEmitter()                                 
+      158 +        self.scale = scale                                    
+      159          # {filename: go_source}                               
+      160          self.go_files: dict[str, str] = {}                    
+      161          # {func_name: expected_balanced}                      
+      162          self.expected: dict[str, bool] = {}                   
+      163                                                                
+      164 +    def _n(self, base: int) -> int:                           
+      165 +        """Scale a repeat count."""                           
+      166 +        return max(1, int(base * self.scale))                 
+      167 +                                                              
+      168      def _register(self, key: tuple[str, str], balanced: bool) 
+            -> None:                                                     
+      169          self.expected[key] = balanced                         
+      170                                                                
+
+● Now let me revert my earlier manual scale-ups first and then apply _n()
+  systematically throughout the file. Let me revert the manual changes and do
+  this properly.
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      293          idx = 0                                               
+      294                                                                
+      295          # Balanced: varying lengths of New+Wrap pairs         
+      296 -        for length in range(1, 51):                           
+      296 +        for length in range(1, self._n(50) + 1):              
+      297              name = f"f_s01_bal_{idx:03d}"                     
+      298              self.em.func_open(name)                           
+      299              for _ in range(length):                           
+  ⎿  Found 3 new diagnostic issues in 1 file (ctrl+o to expand)
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      306              idx += 1                                          
+      307                                                                
+      308          # Unbalanced: more New than Wrap or vice versa        
+      309 -        for i in range(50):                                   
+      309 +        for i in range(self._n(50)):                          
+      310              name = f"f_s01_unb_{idx:03d}"                     
+      311              news = self.rng.randint(1, 15)                    
+      312              wraps = self.rng.randint(0, 15)                   
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 2 lines, removed 2 lines
+      332          idx = 0                                               
+      333                                                                
+      334          # Balanced: both branches have same delta             
+      335 -        for depth in range(1, 8):                             
+      336 -            for _ in range(7):                                
+      335 +        for depth in range(1, self._n(7) + 1):                
+      336 +            for _ in range(self._n(7)):                       
+      337                  name = f"f_s02_bal_{idx:03d}"                 
+      338                  self.em.func_open(name)                       
+      339                  # prefix New                                  
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      357                  idx += 1                                      
+      358                                                                
+      359          # Unbalanced: branches have different delta           
+      360 -        for _ in range(50):                                   
+      360 +        for _ in range(self._n(50)):                          
+      361              name = f"f_s02_unb_{idx:03d}"                     
+      362              self.em.func_open(name)                           
+      363              pre = self.rng.randint(0, 3)                      
+
+● Now let me apply _n() to all remaining hardcoded counts. I'll read the full
+  file and do a systematic search-and-replace for each category.
+
+● Read 1 file (ctrl+o to expand)
+
+● Rather than edit every single range() call one by one, let me take a more
+  efficient approach — I'll do a bulk replacement using a script pattern. The
+  key hardcoded counts I need to scale are the outer iteration counts (like
+  range(16), range(14), etc.).
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      393          idx = 0                                               
+      394                                                                
+      395          # Balanced: loop body delta=0, break exits            
+      396 -        for _ in range(16):                                   
+      396 +        for _ in range(self._n(16)):                          
+      397              name = f"f_s03_bal_{idx:03d}"                     
+      398              self.em.func_open(name)                           
+      399              pre = self.rng.randint(0, 2)                      
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      421              idx += 1                                          
+      422                                                                
+      423          # Unbalanced: loop body has net != 0 on break path    
+      424 -        for _ in range(14):                                   
+      424 +        for _ in range(self._n(14)):                          
+      425              name = f"f_s03_unb_{idx:03d}"                     
+      426              self.em.func_open(name)                           
+      427              self.em.for_bare_open()                           
+
+● This approach is too tedious. Let me use a script to batch-replace all the
+  remaining hardcoded iteration counts. I'll identify the pattern and apply it.
+
+● Searched for 1 pattern (ctrl+o to expand)
+
+● Bash(python3 -c "
+      import re…)
+  ⎿  Replaced 28 lines
+
+● Good. Also need to handle for ncases in range(2, 6): and for chain_len in 
+  range(2, 6): and for fan in range(2, 5):.
+
+● Searched for 1 pattern (ctrl+o to expand)
+
+● Those are all inner variable-based loops, which is correct. The scale factor
+  is only needed on the outer iteration counts. Now let me update main() to use
+  a higher scale and also update the default.
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      1354  # ---------------------------------------------------------- 
+            -----------------                                            
+      1355                                                               
+      1356  def main() -> None:                                          
+      1357 -    gen = StressGenerator(seed=SEED)                         
+      1357 +    gen = StressGenerator(seed=SEED, scale=2.6)              
+      1358      gen.generate_all()                                       
+      1359      gen.write_go_files()                                     
+      1360      gen.write_test_file()                                    
+
+● Bash(source .venv/bin/activate && python tests/gen_stress.py 2>&1)
+  ⎿  Generated 15 Go files with 1611 test entries
+       Balanced: 909, Unbalanced: 702
+       stress_01_simple.go: 19783 lines, 260 entries
+     … +14 lines (ctrl+o to expand)
+
+● The scale factor created too many functions. I need to target ~530 functions,
+  ~20000 lines. Let me use scale=1.0 for function counts but increase internal
+  body complexity.
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      1354  # ---------------------------------------------------------- 
+            -----------------                                            
+      1355                                                               
+      1356  def main() -> None:                                          
+      1357 -    gen = StressGenerator(seed=SEED, scale=2.6)              
+      1357 +    gen = StressGenerator(seed=SEED, scale=1.0)              
+      1358      gen.generate_all()                                       
+      1359      gen.write_go_files()                                     
+      1360      gen.write_test_file()                                    
+
+● Now let me increase the internal body sizes across all categories. The key is
+  making the random ranges for d, pre, etc. bigger.
+
+● Read 1 file (ctrl+o to expand)
+
+● Bash(source .venv/bin/activate && python tests/gen_stress.py 2>&1)
+  ⎿  Generated 15 Go files with 549 test entries
+       Balanced: 278, Unbalanced: 271
+       stress_01_simple.go: 3614 lines, 100 entries
+     … +14 lines (ctrl+o to expand)
+
+● 549 functions, ~10280 lines total. I need to get to ~20000 lines. Let me scale
+   up the categories that produce fewer lines per function. I'll use scale=2.0
+  which should roughly double everything.
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      1354  # ---------------------------------------------------------- 
+            -----------------                                            
+      1355                                                               
+      1356  def main() -> None:                                          
+      1357 -    gen = StressGenerator(seed=SEED, scale=1.0)              
+      1357 +    gen = StressGenerator(seed=SEED, scale=2.0)              
+      1358      gen.generate_all()                                       
+      1359      gen.write_go_files()                                     
+      1360      gen.write_test_file()                                    
+
+● Bash(source .venv/bin/activate && python tests/gen_stress.py 2>&1)
+  ⎿  Generated 15 Go files with 1193 test entries
+       Balanced: 652, Unbalanced: 541
+       stress_01_simple.go: 12249 lines, 200 entries
+     … +14 lines (ctrl+o to expand)
+
+● Scale=2.0 is too much for cats 01-02 but too little for others. Let me use
+  targeted counts for cat-01 and cat-02, and scale=1.5 for everything else.
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      293          idx = 0                                               
+      294                                                                
+      295          # Balanced: varying lengths of New+Wrap pairs         
+      296 -        for length in range(1, self._n(50) + 1):              
+      296 +        for length in range(1, 41):                           
+      297              name = f"f_s01_bal_{idx:03d}"                     
+      298              self.em.func_open(name)                           
+      299              for _ in range(length):                           
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      306              idx += 1                                          
+      307                                                                
+      308          # Unbalanced: more New than Wrap or vice versa        
+      309 -        for i in range(self._n(50)):                          
+      309 +        for i in range(40):                                   
+      310              name = f"f_s01_unb_{idx:03d}"                     
+      311              news = self.rng.randint(1, 15)                    
+      312              wraps = self.rng.randint(0, 15)                   
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 2 lines, removed 2 lines
+      332          idx = 0                                               
+      333                                                                
+      334          # Balanced: both branches have same delta             
+      335 -        for depth in range(1, self._n(7) + 1):                
+      336 -            for _ in range(self._n(7)):                       
+      335 +        for depth in range(1, 6):                             
+      336 +            for _ in range(5):                                
+      337                  name = f"f_s02_bal_{idx:03d}"                 
+      338                  self.em.func_open(name)                       
+      339                  # prefix New                                  
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      357                  idx += 1                                      
+      358                                                                
+      359          # Unbalanced: branches have different delta           
+      360 -        for _ in range(self._n(50)):                          
+      360 +        for _ in range(25):                                   
+      361              name = f"f_s02_unb_{idx:03d}"                     
+      362              self.em.func_open(name)                           
+      363              pre = self.rng.randint(0, 3)                      
+
+● Now let me set scale=1.8 for the rest (cats 03-15 which use self._n()):
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      1354  # ---------------------------------------------------------- 
+            -----------------                                            
+      1355                                                               
+      1356  def main() -> None:                                          
+      1357 -    gen = StressGenerator(seed=SEED, scale=2.0)              
+      1357 +    gen = StressGenerator(seed=SEED, scale=1.8)              
+      1358      gen.generate_all()                                       
+      1359      gen.write_go_files()                                     
+      1360      gen.write_test_file()                                    
+
+● Bash(source .venv/bin/activate && python tests/gen_stress.py 2>&1)
+  ⎿  Generated 15 Go files with 751 test entries
+       Balanced: 381, Unbalanced: 370
+       stress_01_simple.go: 2487 lines, 80 entries
+     … +14 lines (ctrl+o to expand)
+
+● 751 entries, 14116 lines — I need more lines per function. Let me add a body
+  size multiplier to make each function body longer.
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 7 lines, removed 1 line
+      152  # ----------------------------------------------------------- 
+           ----------------                                              
+      153                                                                
+      154  class StressGenerator:                                        
+      155 -    def __init__(self, seed: int = SEED, scale: float = 1.0   
+          -) -> None:                                                    
+      155 +    def __init__(self, seed: int = SEED, scale: float = 1.0,  
+      156 +                 body_scale: float = 1.0) -> None:            
+      157          self.rng = random.Random(seed)                        
+      158          self.em = GoEmitter()                                 
+      159          self.scale = scale                                    
+      160 +        self.body_scale = body_scale                          
+      161          # {filename: go_source}                               
+      162          self.go_files: dict[str, str] = {}                    
+      163          # {func_name: expected_balanced}                      
+     ...
+      165          """Scale a repeat count."""                           
+      166          return max(1, int(base * self.scale))                 
+      167                                                                
+      168 +    def _b(self, lo: int, hi: int) -> int:                    
+      169 +        """Random int in [lo, hi*body_scale]."""              
+      170 +        return self.rng.randint(lo, max(lo, int(hi *          
+          +self.body_scale)))                                            
+      171 +                                                              
+      172      def _register(self, key: tuple[str, str], balanced: bool) 
+            -> None:                                                     
+      173          self.expected[key] = balanced                         
+      174                                                                
+
+● Now replace self.rng.randint(lo, hi) calls for body sizes with self._b(lo, 
+  hi). The key ones are the d, pre, news, wraps etc. But I need to be selective
+  — not all randint calls should be scaled (e.g. randint(2, 4) for ncases). Let
+  me do this systematically using a script.
+
+● Bash(python3 -c "
+      import re…)
+  ⎿  Replaced 67 body-var randint calls with _b()
+  ⎿  Found 3 new diagnostic issues in 1 file (ctrl+o to expand)
+
+● Now let me run with body_scale=2.5 and scale=1.8 to get closer to 20000 lines:
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      1360  # ---------------------------------------------------------- 
+            -----------------                                            
+      1361                                                               
+      1362  def main() -> None:                                          
+      1363 -    gen = StressGenerator(seed=SEED, scale=1.8)              
+      1363 +    gen = StressGenerator(seed=SEED, scale=1.8               
+           +, body_scale=2.5)                                            
+      1364      gen.generate_all()                                       
+      1365      gen.write_go_files()                                     
+      1366      gen.write_test_file()                                    
+
+● Bash(source .venv/bin/activate && python tests/gen_stress.py 2>&1)
+  ⎿  Generated 15 Go files with 751 test entries
+       Balanced: 380, Unbalanced: 371
+       stress_01_simple.go: 3250 lines, 80 entries
+     … +14 lines (ctrl+o to expand)
+
+● ~20151 lines, 751 entries. Let me run the tests.
+
+● Bash(source .venv/bin/activate && python -m pytest tests/test_stress.py -x
+      --tb=short -q 2>&1 | tail -15)
+  ⎿  ......................................................................
+     .. [  9%]
+     ......................................................................
+     … +18 lines (ctrl+o to expand)
+
+● All 751 pass. Now let me also run the existing e2e tests.
+
+● Bash(source .venv/bin/activate && python -m pytest tests/ -v --tb=short -q
+      2>&1 | tail -20)
+  ⎿  ============================= test session starts ====================
+     ==========
+     platform linux -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0
+     … +19 lines (ctrl+o to expand)
+
+● 766 tests all pass (15 e2e + 751 stress). Let me now also clean up the minor
+  issues — the unused import and variables.
+
+● Update(tests/gen_stress.py)
+  ⎿  Removed 1 line
+       8  from __future__ import annotations                             
+       9                                                                 
+      10  import random                                                  
+      11 -import textwrap                                                
+      11  from pathlib import Path                                       
+      12                                                                 
+      13  TESTDATA = Path(__file__).parent / "testdata"                  
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      311              idx += 1                                          
+      312                                                                
+      313          # Unbalanced: more New than Wrap or vice versa        
+      314 -        for i in range(40):                                   
+      314 +        for _ in range(40):                                   
+      315              name = f"f_s01_unb_{idx:03d}"                     
+      316              news = self._b(1, 15)                             
+      317              wraps = self._b(0, 15)                            
+  ⎿  Found 3 new diagnostic issues in 1 file (ctrl+o to expand)
+
+● Searched for 2 patterns (ctrl+o to expand)
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      337          idx = 0                                               
+      338                                                                
+      339          # Balanced: both branches have same delta             
+      340 -        for depth in range(1, 6):                             
+      340 +        for _ in range(1, 6):                                 
+      341              for _ in range(5):                                
+      342                  name = f"f_s02_bal_{idx:03d}"                 
+      343                  self.em.func_open(name)                       
+
+● Now let me also fix the Pyright type annotation warning for expected:
+
+● Update(tests/gen_stress.py)
+  ⎿  Added 1 line, removed 1 line
+      160          # {filename: go_source}                               
+      161          self.go_files: dict[str, str] = {}                    
+      162          # {func_name: expected_balanced}                      
+      163 -        self.expected: dict[str, bool] = {}                   
+      163 +        self.expected: dict[tuple[str, str], bool] = {}       
+      164                                                                
+      165      def _n(self, base: int) -> int:                           
+      166          """Scale a repeat count."""                           
+
+● Let me do a final test run to make sure everything still works after cleanup.
+
+● Bash(source .venv/bin/activate && python tests/gen_stress.py && python -m
+      pytest tests/ -q 2>&1 | tail -5)
+  ⎿  Generated 15 Go files with 751 test entries
+       Balanced: 380, Unbalanced: 371
+       stress_01_simple.go: 3250 lines, 80 entries
+     … +15 lines (ctrl+o to expand)
+
+● 全部完成。最终验证汇总：
+
+  ┌─────────────┬────────────┬───────────────────────────────┐
+  │    指标     │    目标    │             实际              │
+  ├─────────────┼────────────┼───────────────────────────────┤
+  │ Go 文件数   │ 多文件拆分 │ 15 个 stress_*.go             │
+  ├─────────────┼────────────┼───────────────────────────────┤
+  │ 总行数      │ ~20000     │ ~20151                        │
+  ├─────────────┼────────────┼───────────────────────────────┤
+  │ 总函数数    │ 400-530    │ 751 测试入口 + 辅助函数       │
+  ├─────────────┼────────────┼───────────────────────────────┤
+  │ 平衡/不平衡 │ ~50:50     │ 380:371                       │
+  ├─────────────┼────────────┼───────────────────────────────┤
+  │ 测试通过    │ 全部       │ 766/766 (15 e2e + 751 stress) │
+  ├─────────────┼────────────┼───────────────────────────────┤
+  │ 执行时间    │ -          │ 0.84s                         │
+  └─────────────┴────────────┴───────────────────────────────┘
+
+  产出的三个文件：
+  - tests/gen_stress.py — 生成器脚本，参数化控制规模（scale=函数数量,
+  body_scale=函数体复杂度）
+  - tests/testdata/stress_*.go — 15 个 Go 源文件，按分类拆分
+  - tests/test_stress.py — pytest 测试文件，内嵌 EXPECTED 字典，每文件只调用一次
+   analyze_program
+
+  【工具调用简报】
+  - Task/Explore: 探索项目结构、理解现有测试模式和分析器 API
+  - Read: 读取所有 15 个 testdata Go 文件 + test_e2e.py + analyzer.py
+  - Write: 创建 gen_stress.py
+  - Edit: 修复 cross-func 链平衡逻辑、mutual recursion 模式、添加
+  scale/body_scale 参数、清理 lint 警告
+  - Bash: 运行生成器、pytest 验证、wc/grep 统计
+  - Grep/Glob: 定位代码位置进行批量替换
+
+✻ Cooked for 21m 40s
+
+❯ 更新设计文档和 readme 文件 
+
+● 【前置说明】本次任务是更新 docs/design.md 和
+  README.md，加入压力测试生成器相关内容。先读取现有文件，再进行编辑。
+
+● Read 2 files (ctrl+o to expand)
+
+● Update(README.md)
+  ⎿  Added 12 lines, removed 2 lines
+      31                                                                 
+      32  ```bash                                                        
+      33  pip install pytest                                             
+      34 +                                                               
+      35 +# Run all tests                                                
+      36  pytest tests/ -v                                               
+      37 +                                                               
+      38 +# Generate stress test fixtures (~750 cases, ~20000 lines of   
+         +Go)                                                            
+      39 +python tests/gen_stress.py                                     
+      40 +                                                               
+      41 +# Run stress tests only                                        
+      42 +pytest tests/test_stress.py -v                                 
+      43  ```                                                            
+      44                                                                 
+      45  ## Project Structure                                           
+     ...
+      44      analyzer.py    # Dataflow analysis + fixed-point iteration 
+      45      main.py        # CLI entry point                           
+      46  tests/                                                         
+      47 -    test_e2e.py    # 11 end-to-end test cases                  
+      48 -    testdata/      # Go test fixtures (01-11)                  
+      47 +    test_e2e.py    # 15 end-to-end test cases                  
+      48 +    test_stress.py # ~750 parametrized stress test cases       
+         +(auto-generated)                                               
+      49 +    gen_stress.py  # Stress test generator script              
+      50 +    testdata/      # Go test fixtures (01-15 manual +          
+         +stress_01-15 generated)                                        
+      51  ```                                                            
+
+● Now update the design doc section 8.
+
+● Update(docs/design.md)
+  ⎿  Added 62 lines, removed 1 line
+      224                                                                
+      225  ## 8. 测试覆盖                                                
+      226                                                                
+      227 -`tests/testdata/` 中的测试用例覆盖：                          
+      227 +### 8.1 手工测试（`tests/test_e2e.py`）                       
+      228                                                                
+      229 +`tests/testdata/` 中的手工测试用例覆盖：                      
+      230 +                                                              
+      231  | # | 场景 | 期望结果 |                                       
+      232  |---|------|---------|                                        
+      233  | 01 | 简单平衡 `New/Wrap` | PASS |                           
+     ...
+      243  | 13 | 嵌套循环，内层 `continue` 跳过 `Wrap`（不平衡） | FAIL 
+            |                                                            
+      244  | 14 | 嵌套循环，`continue LABEL` 跳过外层 `Wrap`（不平衡） | 
+            FAIL |                                                       
+      245  | 15 | 循环 + switch + `fallthrough` + `break LABEL`（平衡）  
+           | PASS |                                                      
+      246 +                                                              
+      247 +### 8.2 压力测试（`tests/test_stress.py`）                    
+      248 +                                                              
+      249 +使用 `tests/gen_stress.py` 自动生成大规模测试，接近真实       
+          +parser 的规模和复杂度。                                       
+      250 +                                                              
+      251 +**运行方式**：                                                
+      252 +                                                              
+      253 +```bash                                                       
+      254 +python tests/gen_stress.py                    # 生成          
+          +stress_*.go + test_stress.py                                  
+      255 +python -m pytest tests/test_stress.py -v      # 运行压力测试  
+      256 +```                                                           
+      257 +                                                              
+      258 +**生成器架构**：                                              
+      259 +                                                              
+      260 +```                                                           
+      261 +gen_stress.py                                                 
+      262 +  ├── GoEmitter          # Go                                 
+          +代码字符串构建器（缩进管理、emit 语句）                       
+      263 +  └── StressGenerator    # 编排所有分类的生成                 
+      264 +        ├── _gen_simple()         # 分类01: 线性序列          
+      265 +        ├── _gen_if_else()        # 分类02: if/else 分支      
+      266 +        ├── _gen_bare_for()       # 分类03: 裸 for {}         
+      267 +        ├── _gen_cond_for()       # 分类04: 有条件 for        
+      268 +        ├── _gen_for_call()       # 分类05: for f_cond() {}   
+      269 +        ├── _gen_switch()         # 分类06: switch/case       
+      270 +        ├── _gen_fallthrough()    # 分类07: fallthrough       
+      271 +        ├── _gen_panic()          # 分类08: panic 剪枝        
+      272 +        ├── _gen_break_continue() # 分类09: break/continue    
+      273 +        ├── _gen_labeled()        # 分类10: 标签              
+          +break/continue                                                
+      274 +        ├── _gen_return()         # 分类11: 提前 return       
+      275 +        ├── _gen_nested()         # 分类12: 嵌套循环          
+      276 +        ├── _gen_cross_func()     # 分类13: 跨函数调用链      
+      277 +        ├── _gen_recursive()      # 分类14: 递归/互递归       
+      278 +        └── _gen_mixed()          # 分类15: 混合复杂场景      
+      279 +```                                                           
+      280 +                                                              
+      281 +**产物**：                                                    
+      282 +                                                              
+      283 +| 文件 | 说明 |                                               
+      284 +|------|------|                                               
+      285 +| `tests/testdata/stress_01_simple.go` ~ `stress_15_mixed.go` 
+          + | 15 个按分类拆分的 Go 源文件 |                              
+      286 +| `tests/test_stress.py` | pytest 测试文件，内嵌 EXPECTED     
+          +字典 |                                                        
+      287 +                                                              
+      288 +**规模**（默认参数 `scale=1.8, body_scale=2.5, seed=42`）：   
+      289 +                                                              
+      290 +| 指标 | 数值 |                                               
+      291 +|------|------|                                               
+      292 +| Go 文件数 | 15 |                                            
+      293 +| 总行数 | ~20000 |                                           
+      294 +| 测试入口数 | ~750（平衡 ~380 / 不平衡 ~370） |              
+      295 +| 执行时间 | < 1s |                                           
+      296 +                                                              
+      297 +**可调参数**：                                                
+      298 +                                                              
+      299 +- `seed` — 随机种子，固定为 42 保证可复现                     
+      300 +- `scale` — 函数数量缩放因子                                  
+      301 +- `body_scale` — 函数体复杂度缩放因子（影响 `db.New/Wrap`     
+          +序列长度）                                                    
+      302 +                                                              
+      303 +**测试优化**：每个 Go 文件只调用一次                          
+          +`analyze_program`（处理文件内所有函数），                     
+      304 +然后逐个检查各函数的 summary，避免 N 次全量分析。             
+
+● 验证一下最终文件内容。
+
+● Read 2 files (ctrl+o to expand)
+
+● 两个文件都已更新完成。
+
+  变更摘要：
+
+  - README.md：更新 Testing 节增加了压力测试生成/运行命令，Project Structure
+  节更新了测试文件数量和新增的 gen_stress.py、test_stress.py
+  - docs/design.md：第 8 节拆分为 8.1（手工测试，原内容保留）和
+  8.2（压力测试），新增生成器架构图、产物表、规模指标和可调参数说明
+
+  【工具调用简报】
+  - Read: 读取 README.md 和 design.md 现有内容
+  - Edit: 更新两个文件的相关章节
+
+✻ Crunched for 1m 14s
+
+❯ 提交当前修改，合理拆分补丁 
+
+● 【前置说明】本次任务是提交当前修改，合理拆分为多个补丁。先查看当前状态。
+
+● Bash(git status -u)
+  ⎿  On branch main
+     Your branch is up to date with 'origin/main'.
+     … +23 lines (ctrl+o to expand)
+
+● Bash(git log --oneline -5)
+  ⎿  5fcead8 add labeled statement support and design doc
+     6eb4078 Merge pull request #3 from wh-timme/mod
+     b951e20 Merge branch 'zevorn:main' into mod
+     … +2 lines (ctrl+o to expand)
+
+● Bash(git diff --stat)
+  ⎿   README.md      | 14 +++++++++++--
+      docs/design.md | 63 +++++++++++++++++++++++++++++++++++++++++++++++++
+     ++++++++-
+      2 files changed, 74 insertions(+), 3 deletions(-)
+
+● 拆分为三个补丁：
+  1. 生成器脚本 (gen_stress.py)
+  2. 生成的测试数据 + 测试文件 (stress_*.go + test_stress.py)
+  3. 文档更新 (README.md + docs/design.md)
+
+● Bash(git add tests/gen_stress.py)
+  ⎿  (No output)
+
+● Bash(git commit -m "$(cat <<'EOF'
+      add stress test generator…)
+  ⎿  [main b43ac24] add stress test generator
+      1 file changed, 1380 insertions(+)
+      create mode 100644 tests/gen_stress.py
+
+● Bash(git add tests/testdata/stress_*.go tests/test_stress.py)
+  ⎿  (No output)
+
+● Bash(git commit -m "$(cat <<'EOF'
+      add generated stress test fixtures and test runner…)
+  ⎿  [main 7265e94] add generated stress test fixtures and test runner
+      16 files changed, 20956 insertions(+)
+      create mode 100644 tests/test_stress.py
+     … +13 lines (ctrl+o to expand)
+
+● Bash(git add README.md docs/design.md)
+  ⎿  (No output)
+
+● Bash(git commit -m "$(cat <<'EOF'
+      update docs for stress test generator…)
+  ⎿  [main 7159770] update docs for stress test generator
+      2 files changed, 74 insertions(+), 3 deletions(-)
+
+● Bash(git log --oneline -5)
+  ⎿  7159770 update docs for stress test generator
+     7265e94 add generated stress test fixtures and test runner
+     b43ac24 add stress test generator
+     … +2 lines (ctrl+o to expand)
+
+● Bash(git status)
+  ⎿  On branch main
+     Your branch is ahead of 'origin/main' by 3 commits.
+       (use "git push" to publish your local commits)
+     … +2 lines (ctrl+o to expand)
+
+● 三个补丁已提交，工作树干净：
+
+  ┌─────────────────────────────────────┬──────────────────────────┬────────┐
+  │                补丁                 │           内容           │ 文件数 │
+  ├─────────────────────────────────────┼──────────────────────────┼────────┤
+  │ b43ac24 add stress test generator   │ gen_stress.py            │ 1      │
+  ├─────────────────────────────────────┼──────────────────────────┼────────┤
+  │ 7265e94 add generated stress test   │ test_stress.py + 15 个   │ 16     │
+  │ fixtures and test runner            │ stress_*.go              │        │
+  ├─────────────────────────────────────┼──────────────────────────┼────────┤
+  │ 7159770 update docs for stress test │ README.md +              │ 2      │
+  │  generator                          │ docs/design.md           │        │
+  └─────────────────────────────────────┴──────────────────────────┴────────┘
+
+✻ Cogitated for 1m 18s
+
+❯ 我更新了一下代码，请重新测试，并解决遇到的问题 
+
+● 【前置说明】先查看代码变更情况，然后运行测试。
+
+● Bash(git diff HEAD --stat)
+  ⎿  (No output)
+
+● Bash(git status -u)
+  ⎿  On branch main
+     Your branch is ahead of 'origin/main' by 3 commits.
+       (use "git push" to publish your local commits)
+     … +2 lines (ctrl+o to expand)
+
+● Bash(git log --oneline -8)
+  ⎿  8245949 update docs for stress test generator
+     9ecf7a8 add generated stress test fixtures and test runner
+     5d9506d add stress test generator
+     … +5 lines (ctrl+o to expand)
+
+● 看到有新的 merge commit e93beee (PR #4: switch-break
+  case)。让我查看具体变更，然后运行测试。
+
+● Bash(git show f1520be --stat)
+  ⎿  commit f1520be9db3cd0df9745ad558aeaf1b676316dcb
+     Author: wh-timme <wenheng2@gmail.com>
+     Date:   Fri Feb 27 17:16:37 2026 +0800
+     … +5 lines (ctrl+o to expand)
+
+● Bash(source .venv/bin/activate && python -m pytest tests/ -v --tb=short 2>&1)
+  ⎿  Error: Exit code 1
+     ============================= test session starts 
+     ==============================
+     platform linux -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0 -- 
+     /home/zevorn/go-demo/.venv/bin/python
+     cachedir: .pytest_cache
+     rootdir: /home/zevorn/go-demo
+     configfile: pyproject.toml
+     collecting ... collected 766 items
+
+     tests/test_e2e.py::TestBalanced::test_01_simple_balanced PASSED          [ 
+      0%]
+     tests/test_e2e.py::TestBalanced::test_03_cross_function PASSED           [ 
+      0%]
+
+
+     … +119 lines (ctrl+o to see all)
+
+● 只有 1 个失败：test_12_loop_nested_balanced。这是 PR #4 修改了
+  12_loop_nested_balanced.go 导致的。让我看看变更内容。
+
+● Bash(git show f1520be -- tests/testdata/12_loop_nested_balanced.go)
+  ⎿  commit f1520be9db3cd0df9745ad558aeaf1b676316dcb
+     Author: wh-timme <wenheng2@gmail.com>
+     Date:   Fri Feb 27 17:16:37 2026 +0800
+     … +32 lines (ctrl+o to expand)
+
+● Read 1 file (ctrl+o to expand)
+
+● 测试失败在 test_12_loop_nested_balanced。PR #4 添加了 LABEL_SW: 标签到 switch
+  语句和 break LABEL_SW。让我分析根因。
+
+● Read 1 file (ctrl+o to expand)
+
+● 问题定位了。PR #4 添加了 LABEL_SW: 标签在 switch 语句上以及 break 
+  LABEL_SW。当前 CFG builder 只处理 labeled for，不处理 labeled
+  switch。而且更关键的是：Go 中 break 在 switch 内应退出
+  switch，但当前实现错误地让它退出外层 for 循环。
+
+  需要修复两个问题：
+  1. _build_switch 需要将 switch 注册为 break 目标
+  2. _build_labeled 需要支持 labeled switch
+
+● Update(box_checker/cfg.py)
+  ⎿  Added 2 lines
+      240              return [pred_id]                                  
+      241          if inner_stmt.type == "for_statement" and label:      
+      242              return self._build_for(inner_stmt, pred_id,       
+           exit_n, label=label)                                          
+      243 +        if inner_stmt.type == "expression_switch_statement"   
+          +and label:                                                    
+      244 +            return self._build_switch(inner_stmt, pred_id,    
+          +exit_n, label=label)                                          
+      245          return self._build_stmt(inner_stmt, pred_id, exit_n)  
+      246                                                                
+      247      # ------------------------------------------------------- 
+           --------                                                      
+
+● Now fix _build_switch to register switch as a break target:
+
+● Update(box_checker/cfg.py)
+  ⎿  Added 18 lines, removed 3 lines
+      313      # ------------------------------------------------------- 
+           --------                                                      
+      314                                                                
+      315      def _build_switch(                                        
+      316 -        self, node: Node, pred_id: int, exit_n: CFGNode       
+      316 +        self, node: Node, pred_id: int, exit_n: CFGNode,      
+      317 +        label: str | None = None,                             
+      318      ) -> list[int]:                                           
+      319          switch_node = self._new_node("switch")                
+      320 +        switch_exit = self._new_node("switch_exit")           
+      321          self._nodes[pred_id].succs.append(switch_node.id)     
+      322                                                                
+      323 +        # In Go, break inside switch exits the switch         
+      324 +        self._break_targets.append(switch_exit.id)            
+      325 +        if label:                                             
+      326 +            self._label_break_targets[label] = switch_exit.id 
+      327 +                                                              
+      328          tails: list[int] = []                                 
+      329          has_default = False                                   
+      330                                                                
+     ...
+      373              else:                                             
+      374                  tails.extend(case_tails)                      
+      375                                                                
+      376 +        self._break_targets.pop()                             
+      377 +        if label:                                             
+      378 +            del self._label_break_targets[label]              
+      379 +                                                              
+      380          if not has_default:                                   
+      381 -            tails.append(switch_node.id)                      
+      381 +                                                              
+          +self._nodes[switch_node.id].succs.append(switch_exit.id)      
+      382                                                                
+      383 -        return tails                                          
+      383 +        # Connect all case tails to switch_exit               
+      384 +        for t in tails:                                       
+      385 +            self._nodes[t].succs.append(switch_exit.id)       
+      386 +                                                              
+      387 +        return [switch_exit.id]                               
+  ⎿  Found 5 new diagnostic issues in 1 file (ctrl+o to expand)
+
+● Bash(source .venv/bin/activate && python -m pytest tests/test_e2e.py -v
+      --tb=short 2>&1)
+  ⎿  ============================= test session starts ====================
+     ==========
+     platform linux -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0 -- /home/z
+     … +20 lines (ctrl+o to expand)
+
+● 15/15 e2e 通过。现在运行全部测试：
+
+● Bash(source .venv/bin/activate && python -m pytest tests/ -q 2>&1 | tail -5)
+  ⎿  ......................................................................
+     .. [ 75%]
+     ......................................................................
+     … +6 lines (ctrl+o to expand)
+
+● 766/766 全部通过。问题已修复。
+
+  根因分析：PR #4 在 switch 上添加了 LABEL_SW: 标签和 break 
+  LABEL_SW/break，暴露了 CFG builder 的两个缺陷：
+
+  1. break 在 switch 内的语义错误 — Go 中 break 退出最内层的
+  for/switch/select，但 CFG builder 只将 for 注册为 break 目标，导致 switch 内的
+   break 错误地退出外层 for 循环
+  2. 不支持 labeled switch — _build_labeled 只处理 LABEL: for，不处理 LABEL: 
+  switch
+
+  修复内容（box_checker/cfg.py）：
+  - _build_switch：新增 switch_exit 节点，将 switch 压入 _break_targets
+  栈；支持可选 label 参数注册 _label_break_targets
+  - _build_labeled：增加对 expression_switch_statement 的标签传递
+
+  【工具调用简报】
+  - Bash: git log/show 查看 PR #4 变更，pytest 运行测试
+  - Read: 读取 cfg.py 和修改后的 12_loop_nested_balanced.go
+  - Edit: 修复 _build_switch 和 _build_labeled
+
+✻ Sautéed for 3m 48s
+
+❯ 完善设计文档，并提交修改，合理拆分补丁 
+
+● 【前置说明】先查看当前变更状态和设计文档相关章节，然后完善文档并拆分提交。
+
+● Bash(git status -u && echo "===" && git diff --stat)
+  ⎿  On branch main
+     Your branch is ahead of 'origin/main' by 3 commits.
+       (use "git push" to publish your local commits)
+     … +11 lines (ctrl+o to expand)
+
+● Bash(git log --oneline -5)
+  ⎿  8245949 update docs for stress test generator
+     9ecf7a8 add generated stress test fixtures and test runner
+     5d9506d add stress test generator
+     … +2 lines (ctrl+o to expand)
+
+● Bash(git diff box_checker/cfg.py)
+  ⎿  diff --git a/box_checker/cfg.py b/box_checker/cfg.py
+     index fbb4bb1..fa0eb38 100644
+     --- a/box_checker/cfg.py
+     … +24 lines (ctrl+o to expand)
+
+● 现在读取设计文档，确定需要更新哪些章节。
+
+● Read 1 file (ctrl+o to expand)
+
+● 设计文档需要更新三处以反映 switch break 目标修复：语句映射表、break
+  目标栈说明、switch 语义小节。另外测试 12 的描述也需更新。
+
+● Update(docs/design.md)
+  ⎿  Added 5 lines, removed 4 lines
+       92  | `if / else` | 条件节点 → 两分支；在汇合点合并 |             
+       93  | `for {}` | `for_head → for_body → (回边到 for_head)` +      
+           `for_exit` |                                                  
+       94  | `for cond {}` | `for_head → [for_exit \|                    
+           for_body]`；条件中的调用内联在 head 之后 |                    
+       95 -| `switch` | `switch_node` → 每个 case 一个分支               
+          -；`fallthrough` 链接到下一个 case 的 body |                   
+       96 -| `break` | 将当前节点连接到最内层 `for_exit`；返回空 tails | 
+       97 -| `continue` | 将当前节点                                     
+          -连接到最内层 `for_head`；返回空 tails |                       
+       98 -| `break LABEL` | 连接到标签 `LABEL` 所在循环的 `for_exit` |  
+       95 +| `switch` | `switch_node` → 每个 case 一个分支               
+          + → `switch_exit`；`fallthrough` 链接到下一个 case 的 body |   
+       96 +| `break` | 连接到最内层 `for_exit` 或 `switch_exit`          
+          +；返回空 tails |                                              
+       97 +| `continue` | 连接到最内层 `for_head`；返回空 tails |        
+       98 +| `break LABEL` | 连接到标签 `LABEL` 所在 `for`               
+          +/ `switch` 的 exit 节点 |                                     
+       99  | `continue LABEL` | 连接到标签 `LABEL` 所在循环的 `for_head` 
+            |                                                            
+      100  | `LABEL: for {}` | 与 `for {}` 相同，但在构建 body           
+           前注册标签映射 |                                              
+      101 +| `LABEL: switch` | 与 `switch` 相同，但在构建 cases          
+          +前注册标签映射 |                                              
+      102                                                                
+      103  ### break / continue 目标栈                                   
+      104                                                                
+
+● Update(docs/design.md)
+  ⎿  Added 8 lines, removed 5 lines
+      105  `CFGBuilder` 维护两组并行的数据结构：                         
+      106                                                                
+      107  **栈**（用于无标签的 break/continue）：                       
+      108 -- `_break_targets: list[int]` — 循环                          
+          -退出节点 ID 栈，进入 `for` 时压入                             
+      108 +- `_break_targets: list[int]` — 退出节点 ID 栈，进入 `for`    
+          +/ `switch` 时压入                                             
+      109  - `_continue_targets: list[int]` — 循环头节点 ID 栈，进入     
+           `for` 时压入                                                  
+      110                                                                
+      111 -无标签的 `break` / `continue` 使用栈顶 `[-1]`（最内层循环）。 
+      111 +Go 规范中 `break` 终止最内层 `for`、`switch` 或               
+          +`select`，因此 `_break_targets`                               
+      112 +在进入 `for`（压入 `for_exit`）和 `switch`（压入              
+          +`switch_exit`）时都会更新。                                   
+      113 +`continue` 仅适用于 `for`，所以 `_continue_targets` 只在进入  
+          +`for` 时压入。                                                
+      114 +无标签的 `break` / `continue` 使用栈顶 `[-1]`。               
+      115                                                                
+      116  **字典**（用于带标签的 break/continue）：                     
+      117  - `_label_break_targets: dict[str, int]`                      
+      118  - `_label_continue_targets: dict[str, int]`                   
+      119                                                                
+      120 -在进入带标签的 `for` 循环时注册，退出时删除。这正确建模了 Go  
+          -语义：                                                        
+      121 -`continue LABEL` 跳转到**外层标签循环**的头部，               
+          -跳过内层循环体和外层循环体的                                  
+      122 -剩余部分。                                                    
+      120 +在进入带标签的 `for` 或 `switch` 时注册 break                 
+          +目标，退出时删除。                                            
+      121 +`continue LABEL` 仅对标签 `for` 循环有效，                    
+          +跳转到**外层标签循环**的头部，                                
+      122 +跳过内层循环体和外层循环体的剩余部分。                        
+      123                                                                
+      124  ### switch 语义                                               
+      125                                                                
+
+● Update(docs/design.md)
+  ⎿  Added 8 lines, removed 5 lines
+      123                                                                
+      124  ### switch 语义                                               
+      125                                                                
+      126 -- 每个 case 的 body 从共享的 `switch_node` 开始构建。         
+      126 +- 构建时创建 `switch_node`（入口）和                          
+          +`switch_exit`（出口）两个节点。                               
+      127 +- 每个 case 的 body 从共享的 `switch_node` 开始构建，所有     
+          +case tails 最终汇聚到                                         
+      128 +  `switch_exit`。                                             
+      129  - `fallthrough` 通过中间 `fallthrough` 节点将当前 case 的     
+           tails 链接到                                                  
+      130    **下一个** case 的 body。                                   
+      131 -- switch 内的 `break` 使用 `_break_targets[-1]`（外层循环的   
+          -exit）。在 Go 中                                              
+      132 -  若仅需退出 switch，需使用带标签的 `break                    
+          -LABEL`，工具通过标签字典正确处理。                            
+      133 -- 若 switch 无 `default` 分支，则 `switch_node` 自身加入      
+          -tails（"无 case 匹配"                                         
+      134 -  的穿透路径）。                                              
+      131 +- `switch_exit` 被压入 `_break_targets` 栈，因此 switch       
+          +内的无标签 `break` 正确                                       
+      132 +  退出 switch（而非外层循环）。如有标签（`LABEL:              
+          +switch`），同时注册到                                         
+      133 +  `_label_break_targets`，供 `break LABEL` 使用。             
+      134 +- 若 switch 无 `default` 分支，则添加 `switch_node →          
+          +switch_exit` 边（"无 case                                     
+      135 +  匹配"的穿透路径）。                                         
+      136                                                                
+      137  ### 裸 `for {}` vs 有条件循环                                 
+      138                                                                
+
+● 最后更新测试 12 的描述：
+
+● Update(docs/design.md)
+  ⎿  Added 1 line, removed 1 line
+      248  | 09 | `switch` + `fallthrough` | PASS |                      
+      249  | 10 | 提前 `return` 导致不平衡 | FAIL |                      
+      250  | 11 | 循环内 `break` 不带 `Wrap` | PASS |                    
+      251 -| 12 | 嵌套循环 + `break/continue LABEL`（平衡） | PASS |     
+      251 +| 12 | 嵌套循环 + `break/continue LABEL`                      
+          + + labeled switch `break`（平衡） | PASS |                    
+      252  | 13 | 嵌套循环，内层 `continue` 跳过 `Wrap`（不平衡） | FAIL 
+            |                                                            
+      253  | 14 | 嵌套循环，`continue LABEL` 跳过外层 `Wrap`（不平衡） | 
+            FAIL |                                                       
+      254  | 15 | 循环 + switch + `fallthrough` + `break LABEL`（平衡）  
+           | PASS |                                                      
+
+● 验证文档更新后测试仍然全部通过：
+
+● Bash(source .venv/bin/activate && python -m pytest tests/ -q 2>&1 | tail -3)
+  ⎿  ......................................................................
+     .. [ 93%]
+     ..............................................
+     … +2 lines (ctrl+o to expand)
+
+● 现在拆分提交。两个逻辑变更：bugfix 和文档更新。
+
+● Bash(git add box_checker/cfg.py && git commit -m "$(cat <<'EOF'
+      fix: register switch as break target in CFG builder…)
+  ⎿  [main 0b3d9ac] fix: register switch as break target in CFG builder
+      1 file changed, 20 insertions(+), 3 deletions(-)
+
+● Bash(git add docs/design.md && git commit -m "$(cat <<'EOF'
+      docs: update design doc for switch break target semantics…)
+  ⎿  [main 5911d40] docs: update design doc for switch break target semanti
+     cs
+      1 file changed, 22 insertions(+), 15 deletions(-)
+
+● Bash(git log --oneline -7 && echo "===" && git status)
+  ⎿  5911d40 docs: update design doc for switch break target semantics
+     0b3d9ac fix: register switch as break target in CFG builder
+     8245949 update docs for stress test generator
+     … +10 lines (ctrl+o to expand)
+
+● 两个补丁已提交，工作树干净：
+
+  ┌────────────────────┬───────────────────────────────┬────────────────────┐
+  │        补丁        │             内容              │        文件        │
+  ├────────────────────┼───────────────────────────────┼────────────────────┤
+  │ 0b3d9ac fix:       │ 引入 switch_exit 节点，switch │                    │
+  │ register switch as │  压入 _break_targets 栈，支持 │ box_checker/cfg.py │
+  │  break target in   │  LABEL: switch                │                    │
+  │ CFG builder        │                               │                    │
+  ├────────────────────┼───────────────────────────────┼────────────────────┤
+  │ 5911d40 docs:      │ 更新语句映射表、break         │                    │
+  │ update design doc  │ 目标栈说明、switch            │ docs/design.md     │
+  │ for switch break   │ 语义小节、测试 12 描述        │                    │
+  │ target semantics   │                               │                    │
+  └────────────────────┴───────────────────────────────┴────────────────────┘
+
+✻ Cogitated for 2m 32s
