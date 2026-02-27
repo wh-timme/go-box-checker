@@ -92,40 +92,47 @@ BOTTOM 时整条路径被剪枝）。
 | `if / else` | 条件节点 → 两分支；在汇合点合并 |
 | `for {}` | `for_head → for_body → (回边到 for_head)` + `for_exit` |
 | `for cond {}` | `for_head → [for_exit \| for_body]`；条件中的调用内联在 head 之后 |
-| `switch` | `switch_node` → 每个 case 一个分支；`fallthrough` 链接到下一个 case 的 body |
-| `break` | 将当前节点连接到最内层 `for_exit`；返回空 tails |
-| `continue` | 将当前节点连接到最内层 `for_head`；返回空 tails |
-| `break LABEL` | 连接到标签 `LABEL` 所在循环的 `for_exit` |
+| `switch` | `switch_node` → 每个 case 一个分支 → `switch_exit`；`fallthrough` 链接到下一个 case 的 body |
+| `break` | 连接到最内层 `for_exit` 或 `switch_exit`；返回空 tails |
+| `continue` | 连接到最内层 `for_head`；返回空 tails |
+| `break LABEL` | 连接到标签 `LABEL` 所在 `for` / `switch` 的 exit 节点 |
 | `continue LABEL` | 连接到标签 `LABEL` 所在循环的 `for_head` |
 | `LABEL: for {}` | 与 `for {}` 相同，但在构建 body 前注册标签映射 |
+| `LABEL: switch` | 与 `switch` 相同，但在构建 cases 前注册标签映射 |
 
 ### break / continue 目标栈
 
 `CFGBuilder` 维护两组并行的数据结构：
 
 **栈**（用于无标签的 break/continue）：
-- `_break_targets: list[int]` — 循环退出节点 ID 栈，进入 `for` 时压入
+- `_break_targets: list[int]` — 退出节点 ID 栈，进入 `for` / `switch` 时压入
 - `_continue_targets: list[int]` — 循环头节点 ID 栈，进入 `for` 时压入
 
-无标签的 `break` / `continue` 使用栈顶 `[-1]`（最内层循环）。
+Go 规范中 `break` 终止最内层 `for`、`switch` 或 `select`，因此 `_break_targets`
+在进入 `for`（压入 `for_exit`）和 `switch`（压入 `switch_exit`）时都会更新。
+`continue` 仅适用于 `for`，所以 `_continue_targets` 只在进入 `for` 时压入。
+无标签的 `break` / `continue` 使用栈顶 `[-1]`。
 
 **字典**（用于带标签的 break/continue）：
 - `_label_break_targets: dict[str, int]`
 - `_label_continue_targets: dict[str, int]`
 
-在进入带标签的 `for` 循环时注册，退出时删除。这正确建模了 Go 语义：
-`continue LABEL` 跳转到**外层标签循环**的头部，跳过内层循环体和外层循环体的
-剩余部分。
+在进入带标签的 `for` 或 `switch` 时注册 break 目标，退出时删除。
+`continue LABEL` 仅对标签 `for` 循环有效，跳转到**外层标签循环**的头部，
+跳过内层循环体和外层循环体的剩余部分。
 
 ### switch 语义
 
-- 每个 case 的 body 从共享的 `switch_node` 开始构建。
+- 构建时创建 `switch_node`（入口）和 `switch_exit`（出口）两个节点。
+- 每个 case 的 body 从共享的 `switch_node` 开始构建，所有 case tails 最终汇聚到
+  `switch_exit`。
 - `fallthrough` 通过中间 `fallthrough` 节点将当前 case 的 tails 链接到
   **下一个** case 的 body。
-- switch 内的 `break` 使用 `_break_targets[-1]`（外层循环的 exit）。在 Go 中
-  若仅需退出 switch，需使用带标签的 `break LABEL`，工具通过标签字典正确处理。
-- 若 switch 无 `default` 分支，则 `switch_node` 自身加入 tails（"无 case 匹配"
-  的穿透路径）。
+- `switch_exit` 被压入 `_break_targets` 栈，因此 switch 内的无标签 `break` 正确
+  退出 switch（而非外层循环）。如有标签（`LABEL: switch`），同时注册到
+  `_label_break_targets`，供 `break LABEL` 使用。
+- 若 switch 无 `default` 分支，则添加 `switch_node → switch_exit` 边（"无 case
+  匹配"的穿透路径）。
 
 ### 裸 `for {}` vs 有条件循环
 
@@ -241,7 +248,7 @@ def verify(cfgs, entry="f_top") -> (bool, str):
 | 09 | `switch` + `fallthrough` | PASS |
 | 10 | 提前 `return` 导致不平衡 | FAIL |
 | 11 | 循环内 `break` 不带 `Wrap` | PASS |
-| 12 | 嵌套循环 + `break/continue LABEL`（平衡） | PASS |
+| 12 | 嵌套循环 + `break/continue LABEL` + labeled switch `break`（平衡） | PASS |
 | 13 | 嵌套循环，内层 `continue` 跳过 `Wrap`（不平衡） | FAIL |
 | 14 | 嵌套循环，`continue LABEL` 跳过外层 `Wrap`（不平衡） | FAIL |
 | 15 | 循环 + switch + `fallthrough` + `break LABEL`（平衡） | PASS |
