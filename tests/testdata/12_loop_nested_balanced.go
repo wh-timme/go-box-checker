@@ -1,6 +1,6 @@
 package parser
 
-// PASS: loop body has balanced New + Wrap
+// PASS: nested loop body has balanced New + Wrap
 func f_top(db *DepthBox) {
 	LABEL:
 	for {

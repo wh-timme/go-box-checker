@@ -50,6 +50,14 @@ class TestBalanced:
         ok, _ = _check("11_break_in_loop.go")
         assert ok
 
+    def test_12_loop_nested_balanced(self):
+        ok, _ = _check("12_loop_nested_balanced.go")
+        assert ok
+
+    def test_15_loop_switch_balanced(self):
+        ok, _ = _check("15_loop_switch_balanced.go")
+        assert ok
+
 
 class TestUnbalanced:
     def test_02_simple_unbalanced(self):
@@ -66,4 +74,12 @@ class TestUnbalanced:
 
     def test_10_return_mid(self):
         ok, _ = _check("10_return_mid.go")
+        assert not ok
+
+    def test_13_loop_nested_unbalanced(self):
+        ok, _ = _check("13_loop_nested_unbalanced.go")
+        assert not ok
+
+    def test_14_loop_nested_unbalanced(self):
+        ok, _ = _check("14_loop_nested_unbalanced.go")
         assert not ok
