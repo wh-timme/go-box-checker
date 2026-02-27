@@ -224,7 +224,9 @@ def verify(cfgs, entry="f_top") -> (bool, str):
 
 ## 8. 测试覆盖
 
-`tests/testdata/` 中的测试用例覆盖：
+### 8.1 手工测试（`tests/test_e2e.py`）
+
+`tests/testdata/` 中的手工测试用例覆盖：
 
 | # | 场景 | 期望结果 |
 |---|------|---------|
@@ -243,3 +245,62 @@ def verify(cfgs, entry="f_top") -> (bool, str):
 | 13 | 嵌套循环，内层 `continue` 跳过 `Wrap`（不平衡） | FAIL |
 | 14 | 嵌套循环，`continue LABEL` 跳过外层 `Wrap`（不平衡） | FAIL |
 | 15 | 循环 + switch + `fallthrough` + `break LABEL`（平衡） | PASS |
+
+### 8.2 压力测试（`tests/test_stress.py`）
+
+使用 `tests/gen_stress.py` 自动生成大规模测试，接近真实 parser 的规模和复杂度。
+
+**运行方式**：
+
+```bash
+python tests/gen_stress.py                    # 生成 stress_*.go + test_stress.py
+python -m pytest tests/test_stress.py -v      # 运行压力测试
+```
+
+**生成器架构**：
+
+```
+gen_stress.py
+  ├── GoEmitter          # Go 代码字符串构建器（缩进管理、emit 语句）
+  └── StressGenerator    # 编排所有分类的生成
+        ├── _gen_simple()         # 分类01: 线性序列
+        ├── _gen_if_else()        # 分类02: if/else 分支
+        ├── _gen_bare_for()       # 分类03: 裸 for {}
+        ├── _gen_cond_for()       # 分类04: 有条件 for
+        ├── _gen_for_call()       # 分类05: for f_cond() {}
+        ├── _gen_switch()         # 分类06: switch/case
+        ├── _gen_fallthrough()    # 分类07: fallthrough
+        ├── _gen_panic()          # 分类08: panic 剪枝
+        ├── _gen_break_continue() # 分类09: break/continue
+        ├── _gen_labeled()        # 分类10: 标签 break/continue
+        ├── _gen_return()         # 分类11: 提前 return
+        ├── _gen_nested()         # 分类12: 嵌套循环
+        ├── _gen_cross_func()     # 分类13: 跨函数调用链
+        ├── _gen_recursive()      # 分类14: 递归/互递归
+        └── _gen_mixed()          # 分类15: 混合复杂场景
+```
+
+**产物**：
+
+| 文件 | 说明 |
+|------|------|
+| `tests/testdata/stress_01_simple.go` ~ `stress_15_mixed.go` | 15 个按分类拆分的 Go 源文件 |
+| `tests/test_stress.py` | pytest 测试文件，内嵌 EXPECTED 字典 |
+
+**规模**（默认参数 `scale=1.8, body_scale=2.5, seed=42`）：
+
+| 指标 | 数值 |
+|------|------|
+| Go 文件数 | 15 |
+| 总行数 | ~20000 |
+| 测试入口数 | ~750（平衡 ~380 / 不平衡 ~370） |
+| 执行时间 | < 1s |
+
+**可调参数**：
+
+- `seed` — 随机种子，固定为 42 保证可复现
+- `scale` — 函数数量缩放因子
+- `body_scale` — 函数体复杂度缩放因子（影响 `db.New/Wrap` 序列长度）
+
+**测试优化**：每个 Go 文件只调用一次 `analyze_program`（处理文件内所有函数），
+然后逐个检查各函数的 summary，避免 N 次全量分析。

@@ -31,7 +31,15 @@ python -m box_checker path/to/parser.go f_my_entry
 
 ```bash
 pip install pytest
+
+# Run all tests
 pytest tests/ -v
+
+# Generate stress test fixtures (~750 cases, ~20000 lines of Go)
+python tests/gen_stress.py
+
+# Run stress tests only
+pytest tests/test_stress.py -v
 ```
 
 ## Project Structure
@@ -44,6 +52,8 @@ box_checker/
     analyzer.py    # Dataflow analysis + fixed-point iteration
     main.py        # CLI entry point
 tests/
-    test_e2e.py    # 11 end-to-end test cases
-    testdata/      # Go test fixtures (01-11)
+    test_e2e.py    # 15 end-to-end test cases
+    test_stress.py # ~750 parametrized stress test cases (auto-generated)
+    gen_stress.py  # Stress test generator script
+    testdata/      # Go test fixtures (01-15 manual + stress_01-15 generated)
 ```
