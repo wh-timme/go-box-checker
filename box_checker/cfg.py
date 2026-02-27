@@ -15,6 +15,8 @@ class CFGBuilder:
         self._nodes: dict[int, CFGNode] = {}
         self._break_targets: list[int] = []
         self._continue_targets: list[int] = []
+        self._label_break_targets: dict[str, int] = {}
+        self._label_continue_targets: dict[str, int] = {}
 
     def _new_node(self, label: str = "", **kw) -> CFGNode:
         nid = self._next_id
@@ -89,9 +91,11 @@ class CFGBuilder:
         if t == "return_statement":
             return self._build_return(node, pred_id, exit_n)
         if t == "break_statement":
-            return self._build_break(pred_id)
+            return self._build_break(node, pred_id)
         if t == "continue_statement":
-            return self._build_continue(pred_id)
+            return self._build_continue(node, pred_id)
+        if t == "labeled_statement":
+            return self._build_labeled(node, pred_id, exit_n)
         if t == "block":
             inner = self._extract_stmts(node)
             pred_node = self._nodes[pred_id]
@@ -186,25 +190,64 @@ class CFGBuilder:
         return []  # no fall-through
 
     # ---------------------------------------------------------------
-    # break
+    # break / continue (label-aware)
     # ---------------------------------------------------------------
 
-    def _build_break(self, pred_id: int) -> list[int]:
-        if self._break_targets:
-            self._nodes[pred_id].succs.append(self._break_targets[-1])
-        return []  # no fall-through
+    @staticmethod
+    def _stmt_label(node: Node) -> str | None:
+        for child in node.children:
+            if child.type == "label_name":
+                return child.text.decode()
+        return None
 
-    def _build_continue(self, pred_id: int) -> list[int]:
-        if self._continue_targets:
-            self._nodes[pred_id].succs.append(self._continue_targets[-1])
-        return []  # no fall-through
+    def _build_break(self, node: Node, pred_id: int) -> list[int]:
+        label = self._stmt_label(node)
+        if label and label in self._label_break_targets:
+            target = self._label_break_targets[label]
+        elif self._break_targets:
+            target = self._break_targets[-1]
+        else:
+            return []
+        self._nodes[pred_id].succs.append(target)
+        return []
+
+    def _build_continue(self, node: Node, pred_id: int) -> list[int]:
+        label = self._stmt_label(node)
+        if label and label in self._label_continue_targets:
+            target = self._label_continue_targets[label]
+        elif self._continue_targets:
+            target = self._continue_targets[-1]
+        else:
+            return []
+        self._nodes[pred_id].succs.append(target)
+        return []
+
+    # ---------------------------------------------------------------
+    # labeled statement
+    # ---------------------------------------------------------------
+
+    def _build_labeled(
+        self, node: Node, pred_id: int, exit_n: CFGNode
+    ) -> list[int]:
+        label: str | None = None
+        inner_stmt: Node | None = None
+        for child in node.children:
+            if child.type == "label_name":
+                label = child.text.decode()
+            elif child.type != ":":
+                inner_stmt = child
+        if inner_stmt is None:
+            return [pred_id]
+        if inner_stmt.type == "for_statement" and label:
+            return self._build_for(inner_stmt, pred_id, exit_n, label=label)
+        return self._build_stmt(inner_stmt, pred_id, exit_n)
 
     # ---------------------------------------------------------------
     # for loop
     # ---------------------------------------------------------------
 
     def _build_for(
-        self, node: Node, pred_id: int, exit_n: CFGNode
+        self, node: Node, pred_id: int, exit_n: CFGNode, label: str | None = None
     ) -> list[int]:
         loop_head = self._new_node("for_head")
         loop_exit = self._new_node("for_exit")
@@ -243,6 +286,9 @@ class CFGBuilder:
 
         body = node.child_by_field_name("body")
         if body:
+            if label:
+                self._label_break_targets[label] = loop_exit.id
+                self._label_continue_targets[label] = loop_head.id
             self._break_targets.append(loop_exit.id)
             self._continue_targets.append(loop_head.id)
             inner = self._extract_stmts(body)
@@ -251,6 +297,9 @@ class CFGBuilder:
             tails = self._build_block(inner, body_entry, exit_n)
             self._continue_targets.pop()
             self._break_targets.pop()
+            if label:
+                del self._label_break_targets[label]
+                del self._label_continue_targets[label]
             # back-edge
             for t in tails:
                 self._nodes[t].succs.append(loop_head.id)
