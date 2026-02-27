@@ -240,6 +240,8 @@ class CFGBuilder:
             return [pred_id]
         if inner_stmt.type == "for_statement" and label:
             return self._build_for(inner_stmt, pred_id, exit_n, label=label)
+        if inner_stmt.type == "expression_switch_statement" and label:
+            return self._build_switch(inner_stmt, pred_id, exit_n, label=label)
         return self._build_stmt(inner_stmt, pred_id, exit_n)
 
     # ---------------------------------------------------------------
@@ -311,10 +313,17 @@ class CFGBuilder:
     # ---------------------------------------------------------------
 
     def _build_switch(
-        self, node: Node, pred_id: int, exit_n: CFGNode
+        self, node: Node, pred_id: int, exit_n: CFGNode,
+        label: str | None = None,
     ) -> list[int]:
         switch_node = self._new_node("switch")
+        switch_exit = self._new_node("switch_exit")
         self._nodes[pred_id].succs.append(switch_node.id)
+
+        # In Go, break inside switch exits the switch
+        self._break_targets.append(switch_exit.id)
+        if label:
+            self._label_break_targets[label] = switch_exit.id
 
         tails: list[int] = []
         has_default = False
@@ -371,7 +380,15 @@ class CFGBuilder:
             else:
                 tails.extend(case_tails)
 
-        if not has_default:
-            tails.append(switch_node.id)
+        self._break_targets.pop()
+        if label:
+            del self._label_break_targets[label]
 
-        return tails
+        if not has_default:
+            self._nodes[switch_node.id].succs.append(switch_exit.id)
+
+        # Connect all case tails to switch_exit
+        for t in tails:
+            self._nodes[t].succs.append(switch_exit.id)
+
+        return [switch_exit.id]
