@@ -2,7 +2,7 @@ package parser
 
 // PASS: nested loop body has balanced New + Wrap
 func f_top(db *DepthBox) {
-	LABEL:
+	LABEL_FOR:
 	for {
 		db.New()
 		switch mode {
@@ -15,6 +15,9 @@ func f_top(db *DepthBox) {
 					switch mode {
 						case 1:
 							db.New()
+						case 2:
+							db.New()
+							break
 						default:
 							db.Wrap()
 							continue
@@ -26,18 +29,22 @@ func f_top(db *DepthBox) {
 			case 3:
 				for {
 					db.New()
+					LABEL_SW:
 					switch mode {
 						case 1:
 							db.New()
+						case 2:
+							db.New()
+							break LABEL_SW
 						default:
 							db.Wrap()
 							db.Wrap()
-							continue LABEL
+							continue LABEL_FOR
 					}
 					db.Wrap()
 					db.Wrap()
 					db.Wrap()
-					break LABEL
+					break LABEL_FOR
 				}
 			default:
 				db.Wrap()
